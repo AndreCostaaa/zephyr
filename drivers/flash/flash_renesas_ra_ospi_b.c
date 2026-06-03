@@ -22,12 +22,38 @@
 
 LOG_MODULE_REGISTER(flash_renesas_ra_ospi_b, CONFIG_FLASH_LOG_LEVEL);
 
+/*
+ * Functions tagged with OSPI_B_RAMFUNC are relocated to SRAM at runtime.
+ * This is required for two reasons:
+ *   1. Re-initialization: R_OSPI_B_Open and R_BSP_OctaclkUpdate temporarily
+ *      disable XIP memory-mapped access to the OSPI flash. Any instruction
+ *      fetch from the OSPI window during this window faults.
+ *   2. Erase/Write: R_OSPI_B_Erase and R_OSPI_B_Write switch the controller
+ *      to direct-command mode, also disabling XIP for their duration.
+ *
+ * NOTE: The FSP HAL functions called by this driver (R_OSPI_B_Open,
+ * R_OSPI_B_Erase, R_OSPI_B_Write, R_OSPI_B_DirectTransfer,
+ * R_OSPI_B_SpiProtocolSet, R_BSP_OctaclkUpdate) must independently be placed
+ * in SRAM via BSP_PLACE_IN_SECTION(".ramfunc") in the FSP source or an
+ * equivalent linker directive, otherwise the relocation here is incomplete.
+ *
+ * NOTE: LOG_* format strings reside in .rodata on OSPI flash. With deferred
+ * logging (default) they are safe because formatting happens after OSPI
+ * returns to XIP mode. With CONFIG_LOG_MODE_IMMEDIATE they will fault inside
+ * the unsafe windows; disable logging in that configuration.
+ */
+#ifdef CONFIG_FLASH_RENESAS_RA_OSPI_B_XIP
+#define OSPI_B_RAMFUNC __ramfunc
+#else
+#define OSPI_B_RAMFUNC
+#endif
+
 BUILD_ASSERT(CONFIG_HEAP_MEM_POOL_SIZE > 512,
 	     "OSPI_B driver need heap pool to dynamic allocate SFDP table");
 
 /* Flash device timing */
 #define MAX_TIME_ERASE (50000U)
-#define MAX_TIME_WRITE (50U)
+#define MAX_TIME_WRITE (50000U)
 #define MAX_TIME_READ  (5U)
 #define MAX_TIME_WREN  (5U)
 
@@ -36,6 +62,9 @@ BUILD_ASSERT(CONFIG_HEAP_MEM_POOL_SIZE > 512,
 #define SFDP_PARAM_PROFILE_1V0_AVAILABLE   BIT(2)
 #define SFDP_PARAM_SCCR_MAP_AVAILABLE      BIT(3)
 #define SFDP_PARAM_SEQ_OCTAL_DDR_AVAILABLE BIT(4)
+
+#define OSPI_B_OPEN_MAGIC 0x78535049U
+#define OSPI_B_XSPI_PROFILE1_READ_CMD 0xECU
 
 struct flash_region_info {
 	uint32_t offset;
@@ -104,6 +133,10 @@ struct flash_renesas_ra_ospi_b_data {
 	ospi_b_table_t ospi_b_erase_commands;
 	struct flash_sfdp_region sfdp;
 	struct flash_regions_layout regions_layout;
+	struct flash_region_info boot_region;
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+	struct flash_pages_layout boot_layout;
+#endif
 	uint8_t address_mode;
 	struct k_sem sem;
 	uint32_t calib_sector_size;
@@ -126,8 +159,8 @@ struct flash_renesas_ra_ospi_b_config {
 	const uint8_t jedec_id[JESD216_READ_ID_LEN];
 };
 
-static int flash_ospi_b_wait_operation(ospi_b_instance_ctrl_t *p_ctrl, uint8_t bit,
-				       uint8_t desire_bit_value, uint32_t timeout)
+static OSPI_B_RAMFUNC int flash_ospi_b_wait_operation(ospi_b_instance_ctrl_t *p_ctrl, uint8_t bit,
+						      uint8_t desire_bit_value, uint32_t timeout)
 {
 	fsp_err_t err;
 
@@ -142,7 +175,6 @@ static int flash_ospi_b_wait_operation(ospi_b_instance_ctrl_t *p_ctrl, uint8_t b
 			break;
 		}
 
-		k_sleep(K_USEC(200));
 		timeout--;
 	}
 
@@ -154,7 +186,7 @@ static int flash_ospi_b_wait_operation(ospi_b_instance_ctrl_t *p_ctrl, uint8_t b
 	return 0;
 }
 
-static int flash_ospi_b_write_enable(ospi_b_instance_ctrl_t *p_ctrl)
+static OSPI_B_RAMFUNC int flash_ospi_b_write_enable(ospi_b_instance_ctrl_t *p_ctrl)
 {
 	fsp_err_t err;
 	int ret;
@@ -175,7 +207,8 @@ static int flash_ospi_b_write_enable(ospi_b_instance_ctrl_t *p_ctrl)
 	return 0;
 }
 
-static bool flash_ospi_b_is_valid_address(const struct device *dev, off_t offset, size_t len)
+static OSPI_B_RAMFUNC bool flash_ospi_b_is_valid_address(const struct device *dev, off_t offset,
+							 size_t len)
 {
 	struct flash_renesas_ra_ospi_b_data *data = dev->data;
 	struct flash_regions_layout *layout = &data->regions_layout;
@@ -335,8 +368,9 @@ static int flash_renesas_ra_ospi_b_sfdp_read(const struct device *dev, off_t off
 #endif /* CONFIG_FLASH_JESD216_API */
 
 /* Find the region that contains the given offset, or -EINVAL if none. */
-static int flash_ospi_b_find_region(struct flash_renesas_ra_ospi_b_data *data, off_t offset,
-				    struct flash_region_info **region, size_t *remain_len)
+static OSPI_B_RAMFUNC int flash_ospi_b_find_region(struct flash_renesas_ra_ospi_b_data *data,
+						   off_t offset, struct flash_region_info **region,
+						   size_t *remain_len)
 {
 	struct flash_regions_layout *layout = &data->regions_layout;
 
@@ -360,8 +394,9 @@ static int flash_ospi_b_find_region(struct flash_renesas_ra_ospi_b_data *data, o
  * so when offset crosses a region boundary the correct erase types for the new
  * region are automatically selected.
  */
-static uint32_t flash_ospi_b_find_erase_size(struct flash_renesas_ra_ospi_b_data *data,
-					     struct flash_region_info *region, size_t region_remain)
+static OSPI_B_RAMFUNC uint32_t
+flash_ospi_b_find_erase_size(struct flash_renesas_ra_ospi_b_data *data,
+			     struct flash_region_info *region, size_t region_remain)
 {
 	/* Iterate from largest to smallest erase type */
 	for (int8_t i = JESD216_NUM_ERASE_TYPES - 1; i >= 0; i--) {
@@ -375,7 +410,8 @@ static uint32_t flash_ospi_b_find_erase_size(struct flash_renesas_ra_ospi_b_data
 	return 0;
 }
 
-static int flash_renesas_ra_ospi_b_erase(const struct device *dev, off_t offset, size_t len)
+static OSPI_B_RAMFUNC int flash_renesas_ra_ospi_b_erase(const struct device *dev, off_t offset,
+							size_t len)
 {
 	struct flash_renesas_ra_ospi_b_data *ospi_b_data = dev->data;
 	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
@@ -443,11 +479,12 @@ static int flash_renesas_ra_ospi_b_erase(const struct device *dev, off_t offset,
 		}
 
 		erase_time = erase_len / erase_size;
+		unsigned int key = irq_lock();
 
 		for (uint32_t i = 0; i < erase_time; i++) {
 			ret = flash_ospi_b_write_enable(&ospi_b_data->ospi_b_ctrl);
 			if (ret != 0) {
-				return ret;
+				break;
 			}
 
 			err = R_OSPI_B_Erase(&ospi_b_data->ospi_b_ctrl,
@@ -470,6 +507,8 @@ static int flash_renesas_ra_ospi_b_erase(const struct device *dev, off_t offset,
 			offset += erase_size;
 			len -= erase_size;
 		}
+
+		irq_unlock(key);
 
 		if (ret != 0) {
 			break;
@@ -542,8 +581,8 @@ static int flash_renesas_ra_ospi_b_read(const struct device *dev, off_t offset, 
 	return 0;
 }
 
-static int flash_renesas_ra_ospi_b_write(const struct device *dev, off_t offset, const void *data,
-					 size_t len)
+static OSPI_B_RAMFUNC int flash_renesas_ra_ospi_b_write(const struct device *dev, off_t offset,
+							const void *data, size_t len)
 {
 	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
 	struct flash_renesas_ra_ospi_b_data *ospi_b_data = dev->data;
@@ -581,11 +620,19 @@ static int flash_renesas_ra_ospi_b_write(const struct device *dev, off_t offset,
 		return ret;
 	}
 
+	unsigned int key;
+	key = irq_lock();
+
 	while (len > 0) {
+
 		size = len > ospi_b_data->ospi_b_cfg.page_size_bytes
 			       ? ospi_b_data->ospi_b_cfg.page_size_bytes
 			       : len;
 
+		/* Hold IRQs for the entire page-write unit: from write command
+		 * through status polling.  Flash device is busy and unreadable
+		 * (XIP returns garbage) until programming completes.
+		 */
 		err = R_OSPI_B_Write(&ospi_b_data->ospi_b_ctrl, p_src,
 				     (uint8_t *)(config->start_address + offset), size);
 		if (err != FSP_SUCCESS) {
@@ -604,6 +651,8 @@ static int flash_renesas_ra_ospi_b_write(const struct device *dev, off_t offset,
 		offset += size;
 		p_src = p_src + size;
 	}
+
+	irq_unlock(key);
 
 	k_sem_give(&ospi_b_data->sem);
 
@@ -641,9 +690,10 @@ static DEVICE_API(flash, flash_renesas_ra_ospi_b_api) = {
 #endif /* CONFIG_FLASH_JESD216_API */
 };
 
-static int flash_ospi_b_setup_calibrate_data(struct flash_renesas_ra_ospi_b_data *data,
-					     uint32_t flash_start_addr, size_t flash_size,
-					     bool pattern_word_swapped)
+static OSPI_B_RAMFUNC int
+flash_ospi_b_setup_calibrate_data(struct flash_renesas_ra_ospi_b_data *data,
+				  uint32_t flash_start_addr, size_t flash_size,
+				  bool pattern_word_swapped)
 {
 	uint32_t autocalibration_data[4];
 	spi_flash_erase_command_t *erase_type = NULL;
@@ -686,8 +736,8 @@ static int flash_ospi_b_setup_calibrate_data(struct flash_renesas_ra_ospi_b_data
 		   sizeof(autocalibration_data)) != 0) {
 
 		/* Erase the flash sector that stores auto-calibration data */
-		err = R_OSPI_B_Erase(&data->ospi_b_ctrl, (uint8_t *)calib_sector_address,
-				     erase_type->size);
+			err = R_OSPI_B_Erase(&data->ospi_b_ctrl, (uint8_t *)calib_sector_address,
+					     erase_type->size);
 		if (err != FSP_SUCCESS) {
 			LOG_DBG("Erase the flash sector Failed");
 			return -EIO;
@@ -702,7 +752,7 @@ static int flash_ospi_b_setup_calibrate_data(struct flash_renesas_ra_ospi_b_data
 
 		/* Write auto-calibration data to the flash */
 		err = R_OSPI_B_Write(&data->ospi_b_ctrl, (uint8_t *)&autocalibration_data,
-				     (uint8_t *)calib_sector_address, sizeof(autocalibration_data));
+				(uint8_t *)calib_sector_address, sizeof(autocalibration_data));
 		if (err != FSP_SUCCESS) {
 			LOG_DBG("Write auto-calibration data Failed");
 			return -EIO;
@@ -728,8 +778,8 @@ static int flash_ospi_b_setup_calibrate_data(struct flash_renesas_ra_ospi_b_data
 }
 
 /* this helper is only used in 1S-1S-1S mode*/
-static int flash_ospi_b_sfdp_read_helper(ospi_b_instance_ctrl_t *p_ctrl, void *data, off_t offset,
-					 size_t len)
+static OSPI_B_RAMFUNC int flash_ospi_b_sfdp_read_helper(ospi_b_instance_ctrl_t *p_ctrl, void *data,
+							off_t offset, size_t len)
 {
 	fsp_err_t err;
 	uint8_t *p_dst = data;
@@ -752,7 +802,7 @@ static int flash_ospi_b_sfdp_read_helper(ospi_b_instance_ctrl_t *p_ctrl, void *d
 		}
 
 		err = R_OSPI_B_DirectTransfer(p_ctrl, &transfer_sfdp,
-					      SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
+						SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
 		if (err != FSP_SUCCESS) {
 			return -EIO;
 		}
@@ -767,7 +817,8 @@ static int flash_ospi_b_sfdp_read_helper(ospi_b_instance_ctrl_t *p_ctrl, void *d
 }
 
 /* this helper is only used in 1S-1S-1S mode*/
-static int flash_ospi_b_jedec_id_read_helper(ospi_b_instance_ctrl_t *p_ctrl, uint8_t *data)
+static OSPI_B_RAMFUNC int flash_ospi_b_jedec_id_read_helper(ospi_b_instance_ctrl_t *p_ctrl,
+							    uint8_t *data)
 {
 	fsp_err_t err;
 	spi_flash_direct_transfer_t transfer_jedec_id = {.command = SPI_NOR_CMD_RDID,
@@ -778,7 +829,7 @@ static int flash_ospi_b_jedec_id_read_helper(ospi_b_instance_ctrl_t *p_ctrl, uin
 							 .dummy_cycles = 0};
 
 	err = R_OSPI_B_DirectTransfer(p_ctrl, &transfer_jedec_id,
-				      SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
+					SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
 	if (err != FSP_SUCCESS) {
 		return -EIO;
 	}
@@ -788,7 +839,7 @@ static int flash_ospi_b_jedec_id_read_helper(ospi_b_instance_ctrl_t *p_ctrl, uin
 }
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
-static int flash_ospi_b_update_page_layout(struct flash_renesas_ra_ospi_b_data *data)
+static OSPI_B_RAMFUNC int flash_ospi_b_update_page_layout(struct flash_renesas_ra_ospi_b_data *data)
 {
 	struct flash_pages_layout *layout;
 	uint32_t i, j;
@@ -826,8 +877,8 @@ static int flash_ospi_b_update_page_layout(struct flash_renesas_ra_ospi_b_data *
 }
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
 
-static int flash_ospi_b_read_map_format(struct flash_renesas_ra_ospi_b_data *data,
-					const uint32_t *config_map)
+static OSPI_B_RAMFUNC int flash_ospi_b_read_map_format(struct flash_renesas_ra_ospi_b_data *data,
+						       const uint32_t *config_map)
 {
 	struct flash_region_info *regions;
 	uint32_t region_count;
@@ -888,8 +939,9 @@ static int flash_ospi_b_read_map_format(struct flash_renesas_ra_ospi_b_data *dat
 	return 0;
 }
 
-static uint32_t *flash_ospi_b_get_map_in_use(struct flash_renesas_ra_ospi_b_data *data,
-					     uint32_t *smpt_buf, uint8_t smp_len)
+static OSPI_B_RAMFUNC uint32_t *
+flash_ospi_b_get_map_in_use(struct flash_renesas_ra_ospi_b_data *data, uint32_t *smpt_buf,
+			    uint8_t smp_len)
 {
 	uint32_t *ret;
 	uint8_t i;
@@ -918,8 +970,8 @@ static uint32_t *flash_ospi_b_get_map_in_use(struct flash_renesas_ra_ospi_b_data
 				: JESD216_SFDP_SMP_CMD_READ_DUMMY(smpt_buf[i]);
 
 		/* Read the configuration data */
-		fsp_err = R_OSPI_B_DirectTransfer(&data->ospi_b_ctrl, &transfer_read_cfg,
-						  SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
+			fsp_err = R_OSPI_B_DirectTransfer(&data->ospi_b_ctrl, &transfer_read_cfg,
+							  SPI_FLASH_DIRECT_TRANSFER_DIR_READ);
 		if (fsp_err != FSP_SUCCESS) {
 			ret = NULL;
 			return ret;
@@ -962,8 +1014,8 @@ static uint32_t *flash_ospi_b_get_map_in_use(struct flash_renesas_ra_ospi_b_data
 	return ret;
 }
 
-static int flash_ospi_b_smpt_handle(struct flash_renesas_ra_ospi_b_data *data, uint32_t *smpt_buf,
-				    uint8_t smp_len)
+static OSPI_B_RAMFUNC int flash_ospi_b_smpt_handle(struct flash_renesas_ra_ospi_b_data *data,
+						   uint32_t *smpt_buf, uint8_t smp_len)
 {
 	uint32_t *sector_map;
 	int ret;
@@ -991,8 +1043,8 @@ static int flash_ospi_b_smpt_handle(struct flash_renesas_ra_ospi_b_data *data, u
 	return 0;
 }
 
-static void flash_ospi_b_parse_erase_4b(spi_flash_erase_command_t *erase_command,
-					uint32_t *add_4b_param)
+static OSPI_B_RAMFUNC void flash_ospi_b_parse_erase_4b(spi_flash_erase_command_t *erase_command,
+						       uint32_t *add_4b_param)
 {
 	/*
 	 * JESD216H 6.7.3 — 4-Byte Address Instruction Table, 1st DWORD:
@@ -1012,8 +1064,8 @@ static void flash_ospi_b_parse_erase_4b(spi_flash_erase_command_t *erase_command
 	}
 }
 
-static int flash_ospi_b_4byte_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t en4b,
-				     uint16_t enter_4byte_cmd)
+static OSPI_B_RAMFUNC int flash_ospi_b_4byte_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t en4b,
+						    uint16_t enter_4byte_cmd)
 {
 	fsp_err_t err;
 	int ret;
@@ -1085,8 +1137,8 @@ static int flash_ospi_b_4byte_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t en
 	return 0;
 }
 
-static int flash_ospi_b_seq_8d_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t *octal_8d_buf,
-				      uint8_t octal_8d_len)
+static OSPI_B_RAMFUNC int flash_ospi_b_seq_8d_enable(ospi_b_instance_ctrl_t *p_ctrl,
+						     uint32_t *octal_8d_buf, uint8_t octal_8d_len)
 {
 	spi_flash_direct_transfer_t transfer_8d_enb[4];
 	fsp_err_t err;
@@ -1165,8 +1217,9 @@ static int flash_ospi_b_seq_8d_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t *
 	return 0;
 }
 
-static int flash_ospi_b_sccr_8d_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t *sccr_buf,
-				       uint8_t sccr_len, uint8_t address_length)
+static OSPI_B_RAMFUNC int flash_ospi_b_sccr_8d_enable(ospi_b_instance_ctrl_t *p_ctrl,
+						      uint32_t *sccr_buf, uint8_t sccr_len,
+						      uint8_t address_length)
 {
 	spi_flash_direct_transfer_t transfer_8d_enb;
 	fsp_err_t err;
@@ -1269,7 +1322,7 @@ static int flash_ospi_b_sccr_8d_enable(ospi_b_instance_ctrl_t *p_ctrl, uint32_t 
 	return 0;
 }
 
-static int flash_ospi_b_update_flash_config(const struct device *dev)
+static OSPI_B_RAMFUNC int flash_ospi_b_update_flash_config(const struct device *dev)
 {
 	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
 	struct flash_renesas_ra_ospi_b_data *data = dev->data;
@@ -1655,7 +1708,114 @@ static int flash_ospi_b_update_flash_config(const struct device *dev)
 	return 0;
 }
 
-static int flash_ospi_b_nor_probe(const struct device *dev)
+/* Work around only work for mx25lw51245g flash chip */
+#if defined(CONFIG_FLASH_RENESAS_RA_OSPI_B_XIP) && defined(CONFIG_BOOTLOADER_MCUBOOT)
+static int flash_ospi_b_attach_mcuboot_xip(const struct device *dev)
+{
+
+	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
+	struct flash_renesas_ra_ospi_b_data *data = dev->data;
+	ospi_b_extended_cfg_t *extend = &data->ospi_b_config_extend;
+	uint16_t read_cmd = OSPI_B_XSPI_PROFILE1_READ_CMD;
+
+	if (config->protocol != OSPI_OPI_MODE) {
+		return -ENOTSUP;
+	}
+
+	data->address_mode = 4;
+	data->erase_command_list[0].command =
+		SPI_NOR_CMD_SE_4B << 8 | (~SPI_NOR_CMD_SE_4B & 0xff);
+	data->erase_command_list[0].size = config->erase_block_size;
+	for (uint8_t i = 1; i < JESD216_NUM_ERASE_TYPES; i++) {
+		data->erase_command_list[i].command = 0;
+		data->erase_command_list[i].size = 0;
+	}
+
+	data->boot_region.offset = 0;
+	data->boot_region.size = config->flash_size;
+	data->boot_region.erase_mask = BIT(0);
+	data->regions_layout.regions = &data->boot_region;
+	data->regions_layout.region_count = 1;
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+	data->boot_layout.pages_count = config->flash_size / config->erase_block_size;
+	data->boot_layout.pages_size = config->erase_block_size;
+	data->regions_layout.layout = &data->boot_layout;
+#endif
+
+	data->ospi_b_command_set_table.protocol = SPI_FLASH_PROTOCOL_8D_8D_8D;
+	data->ospi_b_command_set_table.frame_format = OSPI_B_FRAME_FORMAT_XSPI_PROFILE_1;
+	data->ospi_b_command_set_table.latency_mode = OSPI_B_LATENCY_MODE_FIXED;
+	data->ospi_b_command_set_table.command_bytes = OSPI_B_COMMAND_BYTES_2;
+	data->ospi_b_command_set_table.address_bytes = SPI_FLASH_ADDRESS_BYTES_4;
+	data->ospi_b_command_set_table.address_msb_mask = 0xF0;
+	/*
+	 * In 8D-8D-8D mode the FSP r_ospi_b_status_sub only adjusts the RDSR
+	 * address length when status_needs_address is already true (it does NOT
+	 * auto-inject an address for chips that need one).  Many OPI flash
+	 * devices (e.g. Macronix MX25LM51245G) require a 4-byte address on
+	 * every read in 8D mode, including RDSR; without it the chip ignores the
+	 * command and returns 0xFF, making BSY appear permanently set.
+	 *
+	 * Force status_needs_address = true for the MCUBoot attach path so that
+	 * both the Zephyr-level flash_ospi_b_wait_operation and the FSP-internal
+	 * r_ospi_b_status_sub (called from R_OSPI_B_Erase / R_OSPI_B_Write) use
+	 * a 4-byte address.  The DT property rdsr-addr-4bytes can still override
+	 * this when a chip genuinely does not need the address.
+	 */
+	data->ospi_b_command_set_table.status_needs_address = true;
+	data->ospi_b_command_set_table.status_address_bytes = SPI_FLASH_ADDRESS_BYTES_4;
+	data->ospi_b_command_set_table.status_address = 0;
+	data->ospi_b_command_set_table.p_erase_commands = &data->ospi_b_erase_commands;
+	data->ospi_b_command_set_table.read_command = read_cmd << 8 | (~read_cmd & 0xff);
+	data->ospi_b_command_set_table.read_dummy_cycles =
+		config->special_require_info.def_8d_dummy_cycles != 0 ?
+		config->special_require_info.def_8d_dummy_cycles : 20;
+	data->ospi_b_command_set_table.program_command =
+		SPI_NOR_CMD_PP_4B << 8 | (~SPI_NOR_CMD_PP_4B & 0xff);
+	data->ospi_b_command_set_table.program_dummy_cycles = 0;
+	data->ospi_b_command_set_table.write_enable_command =
+		SPI_NOR_CMD_WREN << 8 | (~SPI_NOR_CMD_WREN & 0xff);
+	data->ospi_b_command_set_table.status_command =
+		SPI_NOR_CMD_RDSR << 8 | (~SPI_NOR_CMD_RDSR & 0xff);
+	data->ospi_b_command_set_table.status_dummy_cycles = 4;
+
+	transfer_write_enable.command = data->ospi_b_command_set_table.write_enable_command;
+	transfer_write_enable.command_length = 2;
+	transfer_read_status.command = data->ospi_b_command_set_table.status_command;
+	transfer_read_status.command_length = 2;
+	transfer_read_status.dummy_cycles = data->ospi_b_command_set_table.status_dummy_cycles;
+	/* Always send 4-byte address with RDSR in 8D mode (required by most OPI
+	 * flash devices; the FSP r_ospi_b_status_sub only inserts an address when
+	 * status_needs_address is explicitly true).
+	 */
+	transfer_read_status.address_length = 4;
+	transfer_read_status.address = 0;
+
+	data->ospi_b_command_set.p_table = &data->ospi_b_command_set_table;
+	data->ospi_b_command_set.length = 1;
+	data->ospi_b_cfg.spi_protocol = SPI_FLASH_PROTOCOL_8D_8D_8D;
+	data->ospi_b_cfg.address_bytes = SPI_FLASH_ADDRESS_BYTES_4;
+	data->ospi_b_cfg.page_size_bytes = 64;
+	data->ospi_b_cfg.write_status_bit = 0;
+	data->ospi_b_cfg.write_enable_bit = 1;
+	data->ospi_b_cfg.erase_command_list_length = JESD216_NUM_ERASE_TYPES;
+	data->ospi_b_cfg.p_erase_command_list = data->erase_command_list;
+
+	data->ospi_b_ctrl.p_cfg = &data->ospi_b_cfg;
+	data->ospi_b_ctrl.open = OSPI_B_OPEN_MAGIC;
+	data->ospi_b_ctrl.spi_protocol = SPI_FLASH_PROTOCOL_8D_8D_8D;
+	data->ospi_b_ctrl.channel = extend->channel;
+	data->ospi_b_ctrl.ospi_b_unit = extend->ospi_b_unit;
+	data->ospi_b_ctrl.p_cmd_set = &data->ospi_b_command_set_table;
+	data->ospi_b_ctrl.p_reg = (R_XSPI0_Type *)((uintptr_t)R_XSPI0 +
+		extend->ospi_b_unit * ((uintptr_t)R_XSPI1 - (uintptr_t)R_XSPI0));
+
+	LOG_DBG("Attached to MCUboot-initialized OSPI-B 8D XIP state");
+	return 0;
+}
+#endif
+
+static OSPI_B_RAMFUNC int flash_ospi_b_nor_probe(const struct device *dev)
 {
 	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
 	struct flash_renesas_ra_ospi_b_data *data = dev->data;
@@ -1866,7 +2026,7 @@ _exit:
 	return ret;
 }
 
-static int flash_renesas_ra_ospi_b_init(const struct device *dev)
+static OSPI_B_RAMFUNC int flash_renesas_ra_ospi_b_init(const struct device *dev)
 {
 	const struct flash_renesas_ra_ospi_b_config *config = dev->config;
 	struct flash_renesas_ra_ospi_b_data *data = dev->data;
@@ -1879,6 +2039,16 @@ static int flash_renesas_ra_ospi_b_init(const struct device *dev)
 		LOG_ERR("OSPI mode DUAL|QUAD currently not support");
 		return -ENOTSUP;
 	}
+
+	k_sem_init(&data->sem, 1, 1);
+
+#if defined(CONFIG_FLASH_RENESAS_RA_OSPI_B_XIP) && defined(CONFIG_BOOTLOADER_MCUBOOT)
+	ret = flash_ospi_b_attach_mcuboot_xip(dev);
+	if (ret != 0) {
+		LOG_ERR("Failed to attach to MCUboot OSPI-B state (%d)", ret);
+	}
+	return ret;
+#endif
 
 	if (!device_is_ready(config->clock_dev)) {
 		LOG_ERR("Clock control device not ready");
@@ -1908,8 +2078,6 @@ static int flash_renesas_ra_ospi_b_init(const struct device *dev)
 		LOG_ERR("Failed to configure pins (%d)", ret);
 		return ret;
 	}
-
-	k_sem_init(&data->sem, 1, 1);
 
 	/* SFDP spec requires that we downclock the FlexSPI to 50MHz or less */
 	if (clock_freq * config->clock_div > MHZ(800)) {
