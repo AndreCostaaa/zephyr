@@ -371,7 +371,7 @@ int lvgl_init(void)
 #endif
 
 #ifdef CONFIG_LV_Z_FULL_REFRESH
-		lv_display_set_render_mode(lv_displays[i], LV_DISPLAY_RENDER_MODE_FULL);
+		lv_display_set_render_mode(lv_displays[i], LV_DISPLAY_RENDER_MODE_DIRECT);
 #endif
 	}
 
