@@ -11,6 +11,7 @@
 #include "lvgl_display.h"
 #include "lvgl_common_input.h"
 #include "lvgl_zephyr.h"
+#include "misc/lv_event.h"
 #ifdef CONFIG_LV_Z_USE_FILESYSTEM
 #include "lvgl_fs.h"
 #endif
@@ -308,6 +309,12 @@ lv_result_t lv_mem_test_core(void)
 	return LV_RESULT_OK;
 }
 
+static void render_start(lv_event_t *e)
+{
+	lv_display_t *disp = lv_event_get_target(e);
+	struct lvgl_disp_data *p_disp_data = lv_display_get_user_data(disp);
+	k_sem_take(&p_disp_data->flush_complete, K_FOREVER);
+}
 static enum display_event_result display_vsync_event(const struct device *dev, uint32_t evt,
 						     const struct display_event_data *data,
 						     void *user_data)
@@ -370,6 +377,7 @@ int lvgl_init(void)
 			LOG_ERR("Display %d not supported.", i);
 			return -ENOTSUP;
 		}
+		lv_display_add_event_cb(lv_displays[i], render_start, LV_EVENT_RENDER_START, NULL);
 
 		p_disp_data->vsync_event_registered =
 			display_register_event_cb(display_dev[i], display_vsync_event, p_disp_data,
@@ -383,6 +391,7 @@ int lvgl_init(void)
 		 */
 		k_sem_init(&p_disp_data->flush_complete, 0, 1);
 		lv_display_set_flush_wait_cb(lv_displays[i], lvgl_wait_cb);
+		k_sem_give(&p_disp_data->flush_complete);
 #else
 		/* without a flush thread, we only need to set a flush wait callback
 		 * if we successfully registered a vsync event
@@ -390,6 +399,7 @@ int lvgl_init(void)
 		 */
 		if (p_disp_data->vsync_event_registered) {
 			k_sem_init(&p_disp_data->flush_complete, 0, 1);
+			k_sem_give(&p_disp_data->flush_complete);
 			lv_display_set_flush_wait_cb(lv_displays[i], lvgl_wait_cb);
 		}
 #endif

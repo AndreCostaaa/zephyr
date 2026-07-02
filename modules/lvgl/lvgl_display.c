@@ -43,8 +43,8 @@ K_THREAD_DEFINE(lvgl_flush_thread, CONFIG_LV_Z_FLUSH_THREAD_STACK_SIZE, lvgl_flu
 void lvgl_wait_cb(lv_display_t *display)
 {
 	struct lvgl_disp_data *data = (struct lvgl_disp_data *)lv_display_get_user_data(display);
-
-	k_sem_take(&data->flush_complete, K_FOREVER);
+	// LOG_DBG("wait");
+	// k_sem_take(&data->flush_complete, K_FOREVER);
 }
 
 #ifdef CONFIG_LV_Z_USE_ROUNDER_CB
