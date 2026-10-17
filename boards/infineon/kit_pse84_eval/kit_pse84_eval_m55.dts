@@ -6,6 +6,8 @@
  */
 
 /dts-v1/;
+#include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 #include <infineon/edge/mpns/pse846gps2dbzc4a.dtsi>
 #include <infineon/edge/pse84/pse84.cm55.dtsi>
 #include <infineon/edge/pse84/system_clocks.dtsi>
@@ -38,6 +40,7 @@
 		zephyr,dtcm = &dtcm;
 		zephyr,itcm = &itcm;
 		zephyr,touch = &ft5406;
+		zephyr,display = &gfxss;
 		zephyr,entropy = &mxcrypto_trng;
 	};
 };
@@ -53,6 +56,45 @@
 		screen-width = <480>;
 		screen-height = <800>;
 	};
+
+	/* Waveshare 4.3 inch DSI LCD shipped with the kit */
+	dsi_panel: dsi-panel@45 {
+		compatible = "raspberrypi,dsi-panel-mcu";
+		reg = <0x45>;
+		mipi-dsi = <&gfxss_dsi>;
+		data-lanes = <1>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
+	};
+};
+
+&gfxss {
+	status = "okay";
+	width = <800>;
+	height = <480>;
+	pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
+	memory-region = <&gfx_mem>;
+
+	display-timings {
+		compatible = "zephyr,panel-timing";
+		clock-frequency = <33768000>;
+		hsync-len = <10>;
+		hfront-porch = <210>;
+		hback-porch = <20>;
+		vsync-len = <5>;
+		vfront-porch = <20>;
+		vback-porch = <20>;
+		hsync-active = <1>;
+		vsync-active = <1>;
+		de-active = <1>;
+		pixelclk-active = <0>;
+	};
+};
+
+&gfxss_dsi {
+	status = "okay";
+	phy-clock = <810000000>;
+	data-lanes = <1>;
+	pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
 };
 
 &mcwdt1 {

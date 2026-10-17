@@ -1,0 +1,12 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config RPI_DSI_PANEL_MCU
+	bool "Raspberry Pi DSI panel control MCU driver"
+	default y
+	depends on DT_HAS_RASPBERRYPI_DSI_PANEL_MCU_ENABLED
+	select I2C
+	select MIPI_DSI
+	help
+	  Enable driver for the I2C controlled MCU on Raspberry Pi touchscreen compatible
+	  DSI panels, such as the Waveshare 4.3 inch DSI LCD.

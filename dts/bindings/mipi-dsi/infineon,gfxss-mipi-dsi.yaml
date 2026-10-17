@@ -1,0 +1,36 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+title: Infineon GFXSS MIPI DSI host
+
+description: |
+  MIPI DSI host of the Infineon graphics subsystem (GFXSS). The node is a child of
+  the infineon,gfxss-dc display controller, which brings up the D-PHY together with
+  the display controller before any panel attaches. The lane count and pixel format
+  are therefore needed here as well as on the panel node, and the two have to agree.
+  Only video mode is supported.
+
+compatible: "infineon,gfxss-mipi-dsi"
+
+include: mipi-dsi-host.yaml
+
+properties:
+  phy-clock:
+    required: true
+    description: |
+      Bit rate of each data lane, in bits per second.
+
+  data-lanes:
+    type: int
+    required: true
+    enum: [1, 2]
+    description: |
+      Number of MIPI DSI data lanes.
+
+  pixel-format:
+    type: int
+    required: true
+    enum: [0]
+    description: |
+      Pixel format sent over the link. Available formats in
+      dt-bindings/mipi_dsi/mipi_dsi.h. Only MIPI_DSI_PIXFMT_RGB888 is supported.

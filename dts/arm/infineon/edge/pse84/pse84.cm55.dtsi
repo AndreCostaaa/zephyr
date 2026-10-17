@@ -420,6 +420,10 @@
 		     <173 4>; /* CH15 */
 };
 
+&gfxss {
+	interrupts = <140 4>;
+};
+
 &sdhc0 {
 	interrupts = <132 4>, /* SDIO wakeup interrupt for mxsdhc */
 		     <131 6>; /* Consolidated interrupt for mxsdhc */

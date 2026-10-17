@@ -1,0 +1,10 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config MIPI_DSI_INFINEON_GFXSS
+	bool "Infineon GFXSS MIPI DSI host driver"
+	default y
+	depends on DT_HAS_INFINEON_GFXSS_MIPI_DSI_ENABLED
+	depends on DISPLAY_INFINEON_GFXSS
+	help
+	  Enable driver for the MIPI DSI host of the Infineon graphics subsystem (GFXSS).

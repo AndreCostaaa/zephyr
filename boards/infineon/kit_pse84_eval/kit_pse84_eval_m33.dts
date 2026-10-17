@@ -128,7 +128,9 @@
 	status = "okay";
 };
 
+/* 24 MHz external clock on P7.4: reference of the MIPI D-PHY PLL (CLK_HF12) */
 &path_mux4 {
+	source-path = <IFX_CAT1_CLKPATH_IN_EXT>;
 	status = "okay";
 };
 

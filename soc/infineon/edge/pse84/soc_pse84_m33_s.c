@@ -88,6 +88,13 @@ void soc_early_init_hook(void)
 
 	/* Initializes the system */
 	SystemInit();
+
+	/*
+	 * Route the 24 MHz external clock on P7.4 to SRSS. It feeds clock path 4
+	 * (selected in the board DTS) and CLK_HF12, the MIPI D-PHY PLL reference.
+	 */
+	Cy_GPIO_Pin_SecFastInit(GPIO_PRT7, 4U, CY_GPIO_DM_HIGHZ, 0UL, P7_4_SRSS_EXT_CLK);
+	Cy_SysClk_ExtClkSetFrequency(24000000U);
 }
 
 void soc_late_init_hook(void)

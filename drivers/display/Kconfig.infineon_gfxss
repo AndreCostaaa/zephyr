@@ -1,0 +1,22 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config DISPLAY_INFINEON_GFXSS
+	bool "Infineon GFXSS display controller driver"
+	default y
+	depends on DT_HAS_INFINEON_GFXSS_DC_ENABLED
+	select USE_INFINEON_GFXSS
+	select CACHE_MANAGEMENT if CPU_HAS_DCACHE
+	help
+	  Enable driver for the display controller of the Infineon graphics subsystem
+	  (GFXSS), driving a MIPI DSI panel in video mode.
+
+if DISPLAY_INFINEON_GFXSS
+
+config HEAP_MEM_POOL_ADD_SIZE_DISPLAY_INFINEON_GFXSS
+	int
+	default 8192
+	help
+	  System heap reserved for the state the GFXSS HAL allocates with k_malloc().
+
+endif # DISPLAY_INFINEON_GFXSS

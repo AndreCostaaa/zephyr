@@ -46,6 +46,12 @@ config USE_INFINEON_DMA
 	help
 	  Enable DMA HAL module driver for Infineon devices
 
+config USE_INFINEON_GFXSS
+	bool
+	help
+	  Enable Graphics Subsystem (GFXSS) HAL module driver for Infineon devices. This covers
+	  the display controller and the MIPI DSI host.
+
 config USE_INFINEON_I2C
 	bool
 	help

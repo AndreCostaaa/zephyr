@@ -1323,6 +1323,20 @@
 			status = "disabled";
 		};
 
+		gfxss: display-controller@44800000 {
+			compatible = "infineon,gfxss-dc";
+			reg = <0x44800000 0x4000>;
+			interrupts = <163 4>;
+			status = "disabled";
+
+			gfxss_dsi: mipi-dsi {
+				compatible = "infineon,gfxss-mipi-dsi";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+		};
+
 		sdhc0: sdhc@44810000 {
 			compatible = "infineon,sdhc-sdio";
 			reg = <0x44810000 0x2000>;

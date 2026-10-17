@@ -22,6 +22,7 @@
  *
  * SoCMEM (5 MB)
  *   0x26100000  CM55 data                  256 kB
+ *   0x2633C000  Graphics framebuffers     1808 kB
  *
  * RRAM (512 kB)
  *   0x220000000  ext-boot reserved   68 kB
@@ -124,6 +125,10 @@
 
 		m55_data: memory@26100000 {
 			reg = <0x26100000 DT_SIZE_K(256)>;
+		};
+
+		gfx_mem: memory@2633c000 {
+			reg = <0x2633c000 DT_SIZE_K(1808)>;
 		};
 	};
 

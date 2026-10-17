@@ -82,6 +82,39 @@ endif()
 
 zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_DMA ${pdl_drv_dir}/source/cy_dma.c)
 
+if(CONFIG_USE_INFINEON_GFXSS)
+  set(gfxss_dir ${pdl_drv_dir}/third_party/COMPONENT_GFXSS)
+  set(dcnano_dir ${gfxss_dir}/vsi/dcnano8000)
+
+  zephyr_include_directories(
+    ${gfxss_dir}
+    ${dcnano_dir}/include
+    ${dcnano_dir}/DCKernel
+    ${dcnano_dir}/DCKernel/hardware/8000Nano
+    ${dcnano_dir}/DCKernel/rtos
+    ${dcnano_dir}/DCUser
+    ${dcnano_dir}/DCUser/rtos
+  )
+  zephyr_library_sources(
+    ${pdl_drv_dir}/source/cy_mipidsi.c
+    ${gfxss_dir}/cy_graphics.c
+    ${dcnano_dir}/DCKernel/dc_layer_feature.c
+    ${dcnano_dir}/DCKernel/hardware/8000Nano/viv_dc_hardware.c
+    ${dcnano_dir}/DCKernel/rtos/viv_dc_platform.c
+    ${dcnano_dir}/DCKernel/viv_dc_core.c
+    ${dcnano_dir}/DCKernel/viv_dc_database.c
+    ${dcnano_dir}/DCKernel/viv_dc_lcd.c
+    ${dcnano_dir}/DCKernel/viv_dc_shell.c
+    ${dcnano_dir}/DCUser/rtos/viv_dc_interface.c
+    ${dcnano_dir}/DCUser/rtos/viv_dc_os.c
+    ${dcnano_dir}/DCUser/viv_dc_setting.c
+    ${dcnano_dir}/DCUser/viv_dc_tools.c
+    ${dcnano_dir}/DCUser/viv_dc_util.c
+  )
+  # The VeriSilicon OS layer allocates through k_malloc() in its RTOS build
+  zephyr_library_compile_definitions(_BAREMETAL=0)
+endif()
+
 zephyr_library_sources(${pdl_drv_dir}/source/cy_syspm_v4.c)
 zephyr_code_relocate(FILES ${pdl_drv_dir}/source/cy_syspm_v4.c LOCATION ${sram_code})
 

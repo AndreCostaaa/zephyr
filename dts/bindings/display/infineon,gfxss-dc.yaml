@@ -1,0 +1,52 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+title: Infineon GFXSS display controller
+
+description: |
+  Display controller of the Infineon graphics subsystem (GFXSS) found on PSOC Edge
+  devices. It scans out a framebuffer through its DPI output into the MIPI DSI host
+  of the same subsystem, which is described by the mipi-dsi child node.
+
+  The controller fetches lines in multiples of 128 bytes, so the active width sent
+  to the panel is the width property rounded up to a 128-byte stride. The display
+  API exposes the width property.
+
+  Example:
+
+    &gfxss {
+        status = "okay";
+        width = <800>;
+        height = <480>;
+        pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
+        memory-region = <&gfx_mem>;
+
+        display-timings {
+            compatible = "zephyr,panel-timing";
+            clock-frequency = <33768000>;
+            hsync-len = <10>;
+            hfront-porch = <210>;
+            hback-porch = <20>;
+            vsync-len = <5>;
+            vfront-porch = <20>;
+            vback-porch = <20>;
+        };
+    };
+
+compatible: "infineon,gfxss-dc"
+
+include: lcd-controller.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  memory-region:
+    type: phandle
+    required: true
+    description: |
+      Memory region holding the framebuffer. It must be reachable by the display
+      controller bus master and large enough for one frame at the padded stride.

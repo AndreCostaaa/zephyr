@@ -1,0 +1,40 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+title: Raspberry Pi DSI panel control MCU
+
+description: |
+  Microcontroller on the controller board of the Raspberry Pi 7 inch touchscreen,
+  and of panels compatible with it such as the Waveshare 4.3 inch DSI LCD. It
+  powers the DSI-to-DPI bridge and the panel and drives the backlight PWM over
+  I2C. The bridge itself needs no DSI commands, so the driver only checks that the
+  DSI host link matches the panel.
+
+compatible: "raspberrypi,dsi-panel-mcu"
+
+include: i2c-device.yaml
+
+properties:
+  data-lanes:
+    type: array
+    required: true
+    description:
+      Number of data lanes.
+
+  pixel-format:
+    type: int
+    required: true
+    description:
+      Pixel format. Available formats in dt-bindings/mipi_dsi/mipi_dsi.h.
+
+  mipi-dsi:
+    type: phandle
+    required: true
+    description: |
+      MIPI DSI host the panel is connected to.
+
+  brightness:
+    type: int
+    default: 255
+    description: |
+      Backlight PWM duty cycle applied at initialization, 0 to 255.
